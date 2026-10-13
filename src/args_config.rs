@@ -249,8 +249,8 @@ pub struct Args {
     /// 允许与 WireGuard 客户端通信，并信任服务端注入的 WireGuard 明文 IPv4 包
     #[clap(long, default_value_t = true)]
     pub allow_wireguard: bool,
-    /// 允许将服务端下发的 DNS 写入本机系统（默认启用）
-    #[clap(long, default_value_t = true)]
+    /// 允许将服务端下发的 DNS 写入本机系统（命令行默认禁用，仅安卓与 Windows GUI 默认启用）
+    #[clap(long, default_value_t = false)]
     pub allow_dns: bool,
     /// 服务端证书验证
     #[clap(long)]
@@ -420,7 +420,7 @@ fn build_from_args_and_file(args: Args, file: FileConfig) -> anyhow::Result<(Con
         no_broadcast: args.no_broadcast || file.no_broadcast.unwrap_or(false),
         allow_ikev2: args.allow_ikev2 || file.allow_ikev2.unwrap_or(false),
         allow_wireguard: args.allow_wireguard || file.allow_wireguard.unwrap_or(false),
-        allow_dns: args.allow_dns || file.allow_dns.unwrap_or(true),
+        allow_dns: args.allow_dns || file.allow_dns.unwrap_or(false),
         dns: Vec::new(),
         rtx: args.rtx || file.rtx.unwrap_or(false),
         compress: args.compress || file.compress.unwrap_or(false),
@@ -575,7 +575,7 @@ fn build_from_file_only(file: FileConfig) -> anyhow::Result<(Config, CtrlConfig)
         cert_mode,
         output: file.output.unwrap_or_default(),
         auto_sync_subnet: file.auto_sync_subnet.unwrap_or(false),
-        allow_dns: file.allow_dns.unwrap_or(true),
+        allow_dns: file.allow_dns.unwrap_or(false),
         dns: Vec::new(),
         no_nat: file.no_nat.unwrap_or(false),
         device_mode: file.device_mode.unwrap_or_default(),

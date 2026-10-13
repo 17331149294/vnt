@@ -764,6 +764,12 @@ impl NetworkManager {
                 .await?;
             #[cfg(not(any(target_os = "ios", target_os = "tvos")))]
             self.device_io_manager.apply_system_routes(routes).await;
+            // 初次连接/启动网卡时同样把服务端下发的 DNS 写入系统，避免冷启动
+            // 后虚拟网卡 DNS 为空（此前仅在运行时热推送路径写 DNS）。
+            #[cfg(not(any(target_os = "ios", target_os = "tvos")))]
+            self.device_io_manager
+                .apply_system_dns(self.config.allow_dns, &self.config.dns)
+                .await;
         }
         Ok(())
     }

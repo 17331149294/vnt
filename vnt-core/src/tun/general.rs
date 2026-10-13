@@ -285,10 +285,20 @@ impl DeviceIOManager {
         if valid.is_empty() {
             return;
         }
-        let tun_name = self.device.lock().await.tun_name.clone();
         let servers: Vec<String> = valid.into_iter().map(str::to_string).collect();
         #[cfg(windows)]
         let result = {
+            // 优先取真实网卡名（tun-rs 对未指定名字的网卡实际命名为 tun0 之类，
+            // 而 netsh 找不到默认的 "vnt"），回退到用户显式 --tun-name。
+            let tun_name = {
+                let guard = self.device.lock().await;
+                let device_name = guard
+                    .runtime
+                    .as_ref()
+                    .and_then(|runtime| runtime.task.as_ref())
+                    .and_then(|task| task.device.name().ok());
+                device_name.or(guard.tun_name.clone())
+            };
             let servers = servers.clone();
             tokio::task::spawn_blocking(move || {
                 write_windows_dns(&servers, tun_name.as_deref())

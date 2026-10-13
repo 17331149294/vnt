@@ -434,6 +434,10 @@ impl<T> ApiResponse<T> {
     }
 }
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct StartConfig {
     pub config_name: Option<String>,
@@ -465,7 +469,7 @@ pub struct StartConfig {
     pub allow_ikev2: bool,
     #[serde(default)]
     pub allow_wireguard: bool,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub allow_dns: bool,
     #[serde(default)]
     pub dns: Vec<String>,
