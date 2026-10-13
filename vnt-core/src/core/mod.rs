@@ -694,6 +694,7 @@ impl NetworkManager {
         if let Some(tun_name) = self.config.tun_name.clone() {
             config = config.set_tun_name(tun_name);
         }
+        config = config.set_dns(self.config.allow_dns, self.config.dns.clone());
         // 失败时 tun_receiver/enhanced_outbound 不会被消耗，可以重试
         if let Err(e) = self
             .device_io_manager
@@ -727,6 +728,7 @@ impl NetworkManager {
         if let Some(tun_name) = self.config.tun_name.clone() {
             config = config.set_tun_name(tun_name);
         }
+        config = config.set_dns(self.config.allow_dns, self.config.dns.clone());
         if let Err(e) = self
             .device_io_manager
             .start_task(config, &mut self.tun_receiver, &mut self.enhanced_outbound)

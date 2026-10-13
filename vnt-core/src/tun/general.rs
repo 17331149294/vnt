@@ -66,11 +66,21 @@ pub struct DeviceConfig {
     pub tun_fd: Option<std::os::fd::OwnedFd>,
     pub mtu: Option<u16>,
     pub mac_addr: Option<[u8; 6]>,
+    /// 服务端下发的 DNS 列表（--allow-dns 开启时写入虚拟网卡）。
+    pub dns: Vec<String>,
+    /// 是否允许把 DNS 写入虚拟网卡（Windows 通过 netsh，需管理员）。
+    pub allow_dns: bool,
 }
 
 impl DeviceConfig {
     pub fn set_tun_name(mut self, tun_name: String) -> Self {
         self.tun_name = Some(tun_name);
+        self
+    }
+    /// 携带 DNS 与 allow_dns，供创建网卡时立即写入。
+    pub fn set_dns(mut self, allow_dns: bool, dns: Vec<String>) -> Self {
+        self.allow_dns = allow_dns;
+        self.dns = dns;
         self
     }
     #[cfg(unix)]
@@ -523,6 +533,25 @@ fn create_device(config: DeviceConfig) -> anyhow::Result<AsyncDevice> {
         {
             _ = dev.set_tx_queue_len(1000);
         }
+        // 创建网卡后立即把服务端下发的 DNS 写入虚拟网卡（Windows 用刚创建
+        // 设备的实际网卡名，netsh 需管理员权限，失败仅告警）。这样冷启动与
+        // 热更新重建网卡都能保证 DNS 落到新网卡上，不依赖后续状态应用路径。
+        #[cfg(windows)]
+        if config.allow_dns && !config.dns.is_empty() {
+            let servers: Vec<String> = config
+                .dns
+                .iter()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .collect();
+            if !servers.is_empty() {
+                if let Ok(dev_name) = dev.name() {
+                    if let Err(error) = write_windows_dns(&servers, Some(&dev_name)) {
+                        log::warn!("创建网卡后写入 DNS 失败: {error}");
+                    }
+                }
+            }
+        }
         Ok(dev)
     }
 }
@@ -694,15 +723,24 @@ fn write_windows_dns(servers: &[String], tun_name: Option<&str>) -> Result<(), S
     let name = tun_name
         .filter(|value| !value.trim().is_empty())
         .unwrap_or("vnt");
+    log::info!("写入系统 DNS，netsh 接口名: {name:?}");
     let run = |args: &[&str]| -> Result<(), String> {
         let output = Command::new("netsh")
             .args(args)
             .output()
             .map_err(|error| error.to_string())?;
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if !stdout.is_empty() {
+            log::info!("netsh stdout: {stdout}");
+        }
+        if !stderr.is_empty() {
+            log::warn!("netsh stderr: {stderr}");
+        }
         if output.status.success() {
             Ok(())
         } else {
-            Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+            Err(if stderr.is_empty() { stdout } else { stderr })
         }
     };
     // 第一个 DNS 以 static 方式设置，其余按索引追加

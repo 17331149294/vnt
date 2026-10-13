@@ -338,7 +338,7 @@ impl NetworkManager {
     async fn restart_device_with(
         &mut self,
         change: &RuntimeChange,
-        config: DeviceConfig,
+        mut config: DeviceConfig,
     ) -> anyhow::Result<()> {
         if !self.device_mode().has_device() {
             bail!("当前为无虚拟网卡模式，没有可重启的虚拟网卡任务");
@@ -352,6 +352,7 @@ impl NetworkManager {
         // 任务并启动新任务，随后把地址与路由应用到新设备；动作失败不回滚
         self.config.mtu = change.config.mtu;
         self.config.tun_name = change.config.tun_name.clone();
+        config = config.set_dns(change.config.allow_dns, change.config.dns.clone());
         self.device_io_manager.restart_task(config).await?;
         if let Some(address) = &address {
             self.device_io_manager
