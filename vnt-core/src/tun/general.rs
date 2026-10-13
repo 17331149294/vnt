@@ -743,14 +743,15 @@ fn write_windows_dns(servers: &[String], tun_name: Option<&str>) -> Result<(), S
             Err(if stderr.is_empty() { stdout } else { stderr })
         }
     };
-    // 第一个 DNS 以 static 方式设置，其余按索引追加
+    // 第一个 DNS 以 static 方式设置，其余按索引追加。
+    // 注意 netsh 要求 key=value 格式（name=、address=、index=），不能写成
+    // 空格分隔的 "name" "tun0" 两个参数，否则报"此命令提供的语法不正确"。
     run(&[
         "interface",
         "ipv4",
         "set",
         "dnsservers",
-        "name",
-        name,
+        &format!("name={name}"),
         "static",
         &servers[0],
         "register",
@@ -762,12 +763,9 @@ fn write_windows_dns(servers: &[String], tun_name: Option<&str>) -> Result<(), S
             "ipv4",
             "add",
             "dnsservers",
-            "name",
-            name,
-            "address",
-            server,
-            "index",
-            &(index + 1).to_string(),
+            &format!("name={name}"),
+            &format!("address={server}"),
+            &format!("index={}", index + 1),
         ])?;
     }
     Ok(())
