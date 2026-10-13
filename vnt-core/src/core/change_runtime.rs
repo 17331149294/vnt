@@ -581,6 +581,8 @@ impl NetworkManager {
         address.is_some()
             || (change.config.mtu.is_some() && change.config.mtu != self.config.mtu)
             || change.config.tun_name != self.config.tun_name
+            || change.config.dns != self.config.dns
+            || change.config.allow_dns != self.config.allow_dns
             || normalized_routes(self.app_state.subnet_route.applied_routes())
                 != normalized_routes(change.routes.clone())
     }

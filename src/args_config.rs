@@ -267,7 +267,7 @@ pub struct Args {
     #[clap(short, long)]
     pub output: Vec<Ipv4Net>,
     /// 自动获取并应用其他在线节点上报的出口子网
-    #[clap(long, default_value_t = true)]
+    #[clap(long, default_value_t = false)]
     pub auto_sync_subnet: bool,
     /// 自定义设备名称
     #[clap(long, alias = "name")]
@@ -350,6 +350,11 @@ pub struct CtrlConfig {
     pub ctrl_port: Option<u16>,
 }
 
+/// `-o` 出栈允许网段的默认值：未显式指定时放行全部（0.0.0.0/0）。
+fn default_output() -> Vec<Ipv4Net> {
+    vec!["0.0.0.0/0".parse().expect("0.0.0.0/0 must be valid")]
+}
+
 pub fn build_config_from_args_and_file(
     args: Option<Args>,
     file: Option<FileConfig>,
@@ -425,7 +430,7 @@ fn build_from_args_and_file(args: Args, file: FileConfig) -> anyhow::Result<(Con
     };
 
     let output = if args.output.is_empty() {
-        file.output.unwrap_or_default()
+        file.output.unwrap_or_else(default_output)
     } else {
         args.output
     };
@@ -532,7 +537,11 @@ fn build_from_args_only(args: Args) -> anyhow::Result<(Config, CtrlConfig)> {
         cert_mode: args
             .cert_mode
             .unwrap_or(CertValidationMode::InsecureSkipVerification),
-        output: args.output,
+        output: if args.output.is_empty() {
+            default_output()
+        } else {
+            args.output
+        },
         auto_sync_subnet: args.auto_sync_subnet,
         no_nat: args.no_nat,
         device_mode: args.device_mode.unwrap_or_default(),
@@ -611,7 +620,7 @@ fn build_from_file_only(file: FileConfig) -> anyhow::Result<(Config, CtrlConfig)
         outbound_interface: file.outbound_interface.clone(),
         password: file.password.clone(),
         cert_mode,
-        output: file.output.unwrap_or_default(),
+        output: file.output.unwrap_or_else(default_output),
         auto_sync_subnet: file.auto_sync_subnet.unwrap_or(false),
         allow_dns: file.allow_dns.unwrap_or(false),
         dns: file.dns.clone().unwrap_or_default(),

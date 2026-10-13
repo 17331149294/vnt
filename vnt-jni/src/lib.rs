@@ -413,6 +413,8 @@ pub extern "system" fn Java_com_vnt_VntNetwork_nativeNextEvent<'local>(
                                     "device_name": change.config.device_name,
                                     "ip": change.config.ip.as_ref().map(ToString::to_string),
                                     "mtu": change.config.mtu,
+                                    "dns": change.config.dns,
+                                    "allow_dns": change.config.allow_dns,
                                 },
                                 "routes": change.routes,
                                 "needs_vpn_rebuild": plan.vpn_rebuild,
