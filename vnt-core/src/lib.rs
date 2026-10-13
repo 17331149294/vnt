@@ -30,5 +30,7 @@ pub mod internal_bench {
 
 /// 版本号 = 基础版本（CARGO_PKG_VERSION）+ 子版本号。只递增末尾 X。
 /// cargo 版本号只允许三段，因此把第四段子版本号拼接到展示字符串。
+/// 子版本号优先取构建环境变量 VNT_SUBVERSION（CI 在 tag 构建时从
+/// git tag 尾段注入，如 v2.0.10.4 -> "4"）；本地构建未设置时回退 "1"。
 /// 各启动路径（CLI/web/JNI/桌面）统一经此上报版本。
-pub const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), ".1");
+pub const VERSION: &str = env!("VNT_VERSION");

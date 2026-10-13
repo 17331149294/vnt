@@ -97,6 +97,14 @@ jobs:
           path: vnt-web/static
       - name: Init submodules
         run: git submodule update --init --recursive --remote && git submodule status
+      - name: Set sub version from tag
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            SUB="${GITHUB_REF_NAME##*.}"
+          else
+            SUB="1"
+          fi
+          echo "VNT_SUBVERSION=$SUB" >> $GITHUB_ENV
       - name: Cargo cache
         uses: actions/cache@v4
         with:
@@ -344,6 +352,15 @@ jobs:
             target
           key: android-jni-${{ matrix.target }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: android-jni-${{ matrix.target }}-
+
+      - name: Set sub version from tag
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            SUB="${GITHUB_REF_NAME##*.}"
+          else
+            SUB="1"
+          fi
+          echo "VNT_SUBVERSION=$SUB" >> $GITHUB_ENV
 
       - name: Build vnt-jni
         env:

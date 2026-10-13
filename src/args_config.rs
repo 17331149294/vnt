@@ -667,7 +667,7 @@ fn default_hostname() -> String {
 impl FileConfig {
     pub fn print_example(path: Option<&Path>) -> anyhow::Result<()> {
         // 基础版本 + 子版本号，只递增末尾 X
-        const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), ".1");
+        const VERSION: &str = env!("VNT_VERSION");
 
         let example = format!(
             r#"# ==================================
