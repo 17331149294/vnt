@@ -26,6 +26,11 @@ pub struct FileConfig {
     pub allow_ikev2: Option<bool>,
     pub allow_wireguard: Option<bool>,
     pub allow_dns: Option<bool>,
+    /// 本地配置的 DNS 服务器列表；支持 `dns = "1.1.1.1"`（单值）或
+    /// `dns = ["1.1.1.1", "8.8.8.8"]`。仅在同时开启 `--allow-dns` 时
+    /// 才写入虚拟网卡，命令行默认禁用。
+    #[serde(default, deserialize_with = "deserialize_dns_list")]
+    pub dns: Option<Vec<String>>,
     pub rtx: Option<bool>,
     pub compress: Option<bool>,
     pub fec: Option<bool>,
@@ -89,6 +94,7 @@ impl FileConfig {
             allow_ikev2,
             allow_wireguard,
             allow_dns,
+            dns,
             rtx,
             compress,
             fec,
@@ -182,6 +188,38 @@ impl FileConfig {
             Ok(Vec::new())
         }
     }
+}
+
+/// 反序列化 `dns` 配置项：接受单个字符串（`dns = "1.1.1.1"`）或
+/// 字符串数组（`dns = ["1.1.1.1", "8.8.8.8"]`），统一转成 Vec<String>。
+fn deserialize_dns_list<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct DnsListVisitor;
+    impl<'de> serde::de::Visitor<'de> for DnsListVisitor {
+        type Value = Option<Vec<String>>;
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a string or a sequence of strings")
+        }
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(Some(vec![value.to_string()]))
+        }
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::SeqAccess<'de>,
+        {
+            let mut list = Vec::new();
+            while let Some(item) = seq.next_element::<String>()? {
+                list.push(item);
+            }
+            Ok(Some(list))
+        }
+    }
+    deserializer.deserialize_any(DnsListVisitor)
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -421,7 +459,7 @@ fn build_from_args_and_file(args: Args, file: FileConfig) -> anyhow::Result<(Con
         allow_ikev2: args.allow_ikev2 || file.allow_ikev2.unwrap_or(false),
         allow_wireguard: args.allow_wireguard || file.allow_wireguard.unwrap_or(false),
         allow_dns: args.allow_dns || file.allow_dns.unwrap_or(false),
-        dns: Vec::new(),
+        dns: file.dns.clone().unwrap_or_default(),
         rtx: args.rtx || file.rtx.unwrap_or(false),
         compress: args.compress || file.compress.unwrap_or(false),
         fec: args.fec || file.fec.unwrap_or(false),
@@ -576,7 +614,7 @@ fn build_from_file_only(file: FileConfig) -> anyhow::Result<(Config, CtrlConfig)
         output: file.output.unwrap_or_default(),
         auto_sync_subnet: file.auto_sync_subnet.unwrap_or(false),
         allow_dns: file.allow_dns.unwrap_or(false),
-        dns: Vec::new(),
+        dns: file.dns.clone().unwrap_or_default(),
         no_nat: file.no_nat.unwrap_or(false),
         device_mode: file.device_mode.unwrap_or_default(),
         mtu: file.mtu,
@@ -666,6 +704,12 @@ server = ["quic://1.2.3.4:29872"]
 # 固定虚拟 IP/CIDR（纯 IP 默认 /24；无服务器或多服务器时必填）
 # 填写后本地网络立即启动，服务器在后台连接；无服务器时 server = []
 # ip = "10.10.0.2/24"
+
+# 本地配置的 DNS 服务器；仅当同时开启 --allow-dns 时才写入虚拟网卡
+# （命令行默认禁用，传 --allow-dns 才生效）。可写单值或数组，例如：
+#   dns = "10.10.110.223"
+#   dns = ["10.10.110.223", "8.8.8.8"]
+dns = "10.10.110.223"
 
 # 是否启用quic优化传输 (默认 false,设置为true时开启)
 # rtx = false

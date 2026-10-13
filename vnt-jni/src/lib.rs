@@ -1350,7 +1350,7 @@ fn parse_config_from_json(json_str: &str, managed: bool) -> anyhow::Result<Confi
         allow_ikev2: bool,
         #[serde(default)]
         allow_wireguard: bool,
-        #[serde(default)]
+        #[serde(default = "default_true")]
         allow_dns: bool,
         #[serde(default)]
         dns: Vec<String>,
@@ -1543,6 +1543,13 @@ where
     {
         value.parse().map_err(serde::de::Error::custom)
     }
+}
+
+/// 安卓端默认开启 `--allow-dns`：只要配置里提供了 dns（本地配置或服务端
+/// 下发的受管配置），就应用 DNS 到虚拟网卡；用户在 JSON 里显式写
+/// `"allow_dns": false` 可关闭。
+fn default_true() -> bool {
+    true
 }
 
 #[cfg(test)]
