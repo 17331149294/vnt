@@ -719,7 +719,12 @@ impl Encoder<TransmissionBytes> for BytesCodec {
 }
 
 /// Windows：把服务端下发的 DNS 写入虚拟网卡（`--allow-dns`）。
-/// 使用 `netsh interface ipv4 set/add dnsservers`，需要管理员权限。
+/// 将服务端下发的 DNS 静态写入虚拟网卡，需要管理员权限。
+///
+/// netsh 对 wintun 虚拟网卡存在接口定位兼容问题（name=接口名/索引/位置
+/// 参数都可能报"找不到元素"），因此优先走 PowerShell DnsClient cmdlet
+/// 按 InterfaceIndex 写入（Windows 8+），cmdlet 缺失（如 Windows 7）时
+/// 回退 WMI `SetDNSServerSearchOrder`，最后才回退 netsh。
 #[cfg(windows)]
 fn write_windows_dns(
     servers: &[String],
@@ -727,8 +732,15 @@ fn write_windows_dns(
     if_index: Option<u32>,
 ) -> Result<(), String> {
     use std::process::Command;
-    // 优先用接口索引（唯一且 netsh 必能匹配，如 name=60）；回退到网卡名
-    // 或默认 "vnt"。只靠名字在 wintun 网卡上可能报"找不到元素"。
+    // 优先按接口索引（wintun 网卡唯一、必能定位），用 PowerShell/WMI 写入。
+    if let Some(index) = if_index {
+        match write_windows_dns_by_index(index, servers) {
+            Ok(()) => return Ok(()),
+            Err(error) => log::warn!("PowerShell/WMI 写 DNS 失败({error})，回退 netsh"),
+        }
+    }
+    // 回退 netsh：用接口索引或网卡名。只靠名字在 wintun 网卡上可能报
+    // "找不到元素"，但传统网卡（以太网等）用名字可用。
     let name = match if_index {
         Some(index) => index.to_string(),
         None => tun_name
@@ -782,6 +794,66 @@ fn write_windows_dns(
         ])?;
     }
     Ok(())
+}
+
+/// 按接口索引写入 DNS：优先 PowerShell `Set-DnsClientServerAddress`
+/// （Windows 8+ 可用），失败（含 Win7 无此 cmdlet）回退 WMI
+/// `SetDNSServerSearchOrder`。两者都用 InterfaceIndex 精确定位 wintun。
+#[cfg(windows)]
+fn write_windows_dns_by_index(index: u32, servers: &[String]) -> Result<(), String> {
+    use std::process::Command;
+    let addr_list = servers
+        .iter()
+        .map(|s| format!("'{s}'"))
+        .collect::<Vec<_>>()
+        .join(",");
+    // 1) PowerShell DnsClient cmdlet（Win8+）
+    let cmdlet = format!(
+        "Set-DnsClientServerAddress -InterfaceIndex {index} -ServerAddresses {addr_list}"
+    );
+    let out = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &cmdlet])
+        .output()
+        .map_err(|error| error.to_string())?;
+    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    if out.status.success() {
+        log::info!(
+            "已将 DNS 写入接口索引 {index}（Set-DnsClientServerAddress）: {servers:?}"
+        );
+        return Ok(());
+    }
+    log::info!("Set-DnsClientServerAddress 不可用/失败，回退 WMI");
+    // 2) WMI（Win7 无 DnsClient cmdlet）
+    let wmi = format!(
+        "(Get-WmiObject Win32_NetworkAdapterConfiguration -Filter \"InterfaceIndex={index}\").SetDNSServerSearchOrder(@({addr_list}))"
+    );
+    let out2 = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &wmi])
+        .output()
+        .map_err(|error| error.to_string())?;
+    let stdout2 = String::from_utf8_lossy(&out2.stdout).trim().to_string();
+    let stderr2 = String::from_utf8_lossy(&out2.stderr).trim().to_string();
+    if !stdout2.is_empty() {
+        log::info!("WMI SetDNSServerSearchOrder stdout: {stdout2}");
+    }
+    if !stderr2.is_empty() {
+        log::warn!("WMI SetDNSServerSearchOrder stderr: {stderr2}");
+    }
+    if !out2.status.success() {
+        return Err(if stderr2.is_empty() {
+            stdout2
+        } else {
+            stderr2
+        });
+    }
+    // WMI 方法返回 ReturnValue：0 成功、1 需重启等。
+    if stdout2.starts_with('0') {
+        log::info!("已将 DNS 写入接口索引 {index}（WMI）: {servers:?}");
+        Ok(())
+    } else {
+        Err(format!("WMI SetDNSServerSearchOrder 返回 {stdout2}"))
+    }
 }
 
 /// Linux/FreeBSD：尽力把 DNS 写入 /etc/resolv.conf（需要 root 权限）。
