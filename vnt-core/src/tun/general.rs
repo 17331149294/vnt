@@ -304,8 +304,10 @@ impl DeviceIOManager {
         let servers: Vec<String> = valid.into_iter().map(str::to_string).collect();
         #[cfg(windows)]
         let result = {
-            // 优先取真实网卡名（tun-rs 对未指定名字的网卡实际命名为 tun0 之类，
-            // 而 netsh 找不到默认的 "vnt"），回退到用户显式 --tun-name。
+            // 优先取接口索引（netsh 用 name=<index> 一定能匹配），回退到真实
+            // 网卡名（tun-rs 对未指定名字的网卡实际命名为 tun0 之类），再回退
+            // 用户显式 --tun-name。只靠名字在 wintun 网卡上可能"找不到元素"。
+            let if_index = self.device_if_index().await.ok();
             let tun_name = {
                 let guard = self.device.lock().await;
                 let device_name = guard
@@ -317,7 +319,7 @@ impl DeviceIOManager {
             };
             let servers = servers.clone();
             tokio::task::spawn_blocking(move || {
-                write_windows_dns(&servers, tun_name.as_deref())
+                write_windows_dns(&servers, tun_name.as_deref(), if_index)
             })
             .await
         };
@@ -545,10 +547,11 @@ fn create_device(config: DeviceConfig) -> anyhow::Result<AsyncDevice> {
                 .filter(|value| !value.is_empty())
                 .collect();
             if !servers.is_empty() {
-                if let Ok(dev_name) = dev.name() {
-                    if let Err(error) = write_windows_dns(&servers, Some(&dev_name)) {
-                        log::warn!("创建网卡后写入 DNS 失败: {error}");
-                    }
+                // 优先用接口索引（netsh name=<index> 必能匹配），回退网卡名。
+                let if_index = dev.if_index().ok();
+                let dev_name = dev.name().ok();
+                if let Err(error) = write_windows_dns(&servers, dev_name.as_deref(), if_index) {
+                    log::warn!("创建网卡后写入 DNS 失败: {error}");
                 }
             }
         }
@@ -718,12 +721,22 @@ impl Encoder<TransmissionBytes> for BytesCodec {
 /// Windows：把服务端下发的 DNS 写入虚拟网卡（`--allow-dns`）。
 /// 使用 `netsh interface ipv4 set/add dnsservers`，需要管理员权限。
 #[cfg(windows)]
-fn write_windows_dns(servers: &[String], tun_name: Option<&str>) -> Result<(), String> {
+fn write_windows_dns(
+    servers: &[String],
+    tun_name: Option<&str>,
+    if_index: Option<u32>,
+) -> Result<(), String> {
     use std::process::Command;
-    let name = tun_name
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or("vnt");
-    log::info!("写入系统 DNS，netsh 接口名: {name:?}");
+    // 优先用接口索引（唯一且 netsh 必能匹配，如 name=60）；回退到网卡名
+    // 或默认 "vnt"。只靠名字在 wintun 网卡上可能报"找不到元素"。
+    let name = match if_index {
+        Some(index) => index.to_string(),
+        None => tun_name
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or("vnt")
+            .to_string(),
+    };
+    log::info!("写入系统 DNS，netsh 接口标识: {name:?}");
     let run = |args: &[&str]| -> Result<(), String> {
         let output = Command::new("netsh")
             .args(args)
