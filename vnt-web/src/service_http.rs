@@ -466,6 +466,10 @@ pub struct StartConfig {
     #[serde(default)]
     pub allow_wireguard: bool,
     #[serde(default)]
+    pub allow_dns: bool,
+    #[serde(default)]
+    pub dns: Vec<String>,
+    #[serde(default)]
     pub compress: bool,
     #[serde(default)]
     pub rtx: bool,
@@ -1894,7 +1898,7 @@ async fn restart_vnt_handler(
 
 /// 客户端版本号,与组网状态无关,任何时刻都可获取
 async fn get_version() -> Json<ApiResponse<String>> {
-    Json(ApiResponse::success(env!("CARGO_PKG_VERSION").to_string()))
+    Json(ApiResponse::success(vnt_core::VERSION.to_string()))
 }
 
 async fn get_info(
@@ -1935,7 +1939,7 @@ async fn get_info(
                 .as_ref()
                 .map(|v| v.device_name.clone())
                 .unwrap_or_default(),
-            version: env!("CARGO_PKG_VERSION").to_string(),
+            version: vnt_core::VERSION.to_string(),
             ip: network.map(|v| v.ip),
             prefix_len: network.map(|v| v.prefix_len),
             gateway: network.and_then(|v| v.gateway),
@@ -1990,7 +1994,7 @@ async fn get_info(
         }
     } else {
         HttpAppInfo {
-            version: env!("CARGO_PKG_VERSION").to_string(),
+            version: vnt_core::VERSION.to_string(),
             status,
             config_changed,
             ..Default::default()
@@ -2562,6 +2566,8 @@ fn convert_config(cfg: StartConfig) -> anyhow::Result<CoreConfig> {
         no_broadcast: cfg.no_broadcast,
         allow_ikev2: cfg.allow_ikev2,
         allow_wireguard: cfg.allow_wireguard,
+        allow_dns: cfg.allow_dns,
+        dns: cfg.dns,
         rtx: cfg.rtx,
         compress: cfg.compress,
         device_id,
@@ -3101,6 +3107,8 @@ config_name = "local-label"
             no_broadcast: false,
             allow_ikev2: false,
             allow_wireguard: false,
+            allow_dns: false,
+            dns: Vec::new(),
             compress: false,
             rtx: false,
             fec: false,

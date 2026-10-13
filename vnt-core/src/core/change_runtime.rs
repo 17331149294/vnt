@@ -265,6 +265,11 @@ impl NetworkManager {
                 self.device_io_manager.set_tun_name(tun_name).await?;
             }
         }
+        // 服务端下发的 DNS 写入本机系统（--allow-dns）
+        #[cfg(not(any(target_os = "android", target_os = "ios", target_os = "tvos")))]
+        self.device_io_manager
+            .apply_system_dns(change.config.allow_dns, &change.config.dns)
+            .await;
         if let Some(address) = desired {
             // 同步注册 IP，并快速注册到所有已连接服务端（连接不断、无
             // 周期性重注册，服务端映射靠这条通告收敛）

@@ -3,7 +3,10 @@ use crate::context::NetworkAddr;
 use crate::context::config::{Config, DeviceMode};
 use crate::core::NetworkManager;
 use crate::log_manager::InstanceLog;
-use crate::managed_config::{Subscription, SubscriptionListener};
+use crate::managed_config::{
+    parse_envelope_config, EnvelopeConfig, Subscription, SubscriptionListener,
+};
+use crate::protocol::control_message::SubscriptionConfigEnvelope;
 use crate::nat::NetInput;
 use crate::utils::task_control::{TaskGroupGuard, TaskGroupManager};
 use anyhow::Context;
@@ -20,6 +23,26 @@ use tokio::sync::watch;
 pub struct RuntimeChange {
     pub config: Config,
     pub routes: Vec<NetInput>,
+}
+
+/// 直连推送 watch 通道的初始信封（revision=0，表示尚无有效推送）。
+pub(crate) fn default_direct_push_envelope() -> SubscriptionConfigEnvelope {
+    SubscriptionConfigEnvelope {
+        revision: 0,
+        toml: String::new(),
+        managed_ip: std::net::Ipv4Addr::UNSPECIFIED,
+        managed_prefix_len: 0,
+        managed_device_name: String::new(),
+        server_proof: crate::protocol::control_message::SubscriptionServerProof {
+            server_nonce: Vec::new(),
+            server_proof: Vec::new(),
+            target_revision: 0,
+        },
+        network_code: String::new(),
+        device_id: String::new(),
+        source_server_id: String::new(),
+        content_sha256: Vec::new(),
+    }
 }
 
 /// 以订阅信封 `base` 中**实际出现**的字段覆盖 `local`，得到完整有效配置。
@@ -66,6 +89,8 @@ pub fn merge_present_config(
     overlay!("allow_port_mapping", allow_port_mapping);
     overlay!("allow_ikev2", allow_ikev2);
     overlay!("allow_wireguard", allow_wireguard);
+    overlay!("allow_dns", allow_dns);
+    overlay!("dns", dns);
     overlay!("udp_stun", udp_stun);
     overlay!("tcp_stun", tcp_stun);
     // 网络类（虚拟地址之外的入站路由配置）
@@ -133,6 +158,11 @@ pub struct RuntimeChangeManager {
     subscription_listener: Option<SubscriptionListener>,
     routes_tx: watch::Sender<Vec<NetInput>>,
     routes_rx: watch::Receiver<Vec<NetInput>>,
+    /// 服务端对无订阅凭据直连客户端下发的配置信封（SubscriptionConfigPush）。
+    /// 桥接任务从 app_state 订阅更新队列转投到本通道；直连模式下由
+    /// `effective_config`/`changed_with` 消费并合并进有效配置。
+    direct_push_tx: watch::Sender<SubscriptionConfigEnvelope>,
+    direct_push_rx: watch::Receiver<SubscriptionConfigEnvelope>,
     groups: TaskGroupManager,
     log: Arc<InstanceLog>,
     instance: Option<ManagedInstance>,
@@ -154,12 +184,15 @@ impl RuntimeChangeManager {
         log: Arc<InstanceLog>,
     ) -> anyhow::Result<Self> {
         let (routes_tx, routes_rx) = watch::channel(Vec::new());
+        let (direct_push_tx, direct_push_rx) = watch::channel(default_direct_push_envelope());
         let subscription_listener = subscription.map(SubscriptionListener::new);
         let mut manager = Self {
             local_config,
             subscription_listener,
             routes_tx,
             routes_rx,
+            direct_push_tx,
+            direct_push_rx,
             groups: TaskGroupManager::new(),
             log,
             instance: None,
@@ -322,7 +355,8 @@ impl RuntimeChangeManager {
             .context("组网实例未启动")
     }
 
-    /// 有效配置：订阅信封（出现的键）与本地设置的合并。
+    /// 有效配置：订阅信封（出现的键）与本地设置的合并。直连模式下再并入
+    /// 服务端对无订阅凭据客户端下发的配置信封（direct push）。
     async fn effective_config(&mut self) -> anyhow::Result<Config> {
         match self.subscription_listener.as_mut() {
             Some(listener) => {
@@ -333,8 +367,27 @@ impl RuntimeChangeManager {
                     &envelope.present,
                 ))
             }
-            None => Ok(self.local_config.clone()),
+            None => {
+                let mut config = self.local_config.clone();
+                // 消费直连推送的增量通知，再读取最新信封合并
+                if self.direct_push_rx.has_changed()? {
+                    self.direct_push_rx.borrow_and_update();
+                }
+                let envelope = self.direct_push_rx.borrow().clone();
+                if envelope.revision != 0 {
+                    let EnvelopeConfig { config: direct, present } = parse_envelope_config(&envelope);
+                    config = merge_present_config(config, &direct, &present);
+                }
+                Ok(config)
+            }
         }
+    }
+
+    /// 直连推送 watch 通道的发送端克隆，供启动路径把服务端下发的直连配置
+    /// 信封（SubscriptionConfigPush）桥接到运行期配置管理。三个启动路径
+    /// （CLI/web/JNI）经 [`RuntimeChangeManager`] 共用本通道。
+    pub fn direct_push_tx(&self) -> watch::Sender<SubscriptionConfigEnvelope> {
+        self.direct_push_tx.clone()
     }
 
     /// 启动一个组网实例（不含虚拟网卡启动）。
@@ -353,6 +406,18 @@ impl RuntimeChangeManager {
                     manager,
                     _guard: guard,
                 });
+                // 直连推送桥接：把 app_state 订阅更新队列转投到 direct_push
+                // 通道，供直连（无订阅凭据）客户端消费并合并进有效配置。
+                if let Some(api) = self.api() {
+                    let tx = self.direct_push_tx.clone();
+                    tokio::spawn(async move {
+                        while let Some(updates) = api.next_subscription_config_updates().await {
+                            for envelope in updates {
+                                let _ = tx.send_replace(envelope);
+                            }
+                        }
+                    });
+                }
                 Ok(())
             }
             Err(error) => {
@@ -483,6 +548,7 @@ impl RuntimeChangeManager {
         let instance = &mut self.instance;
         let subscription_listener = &mut self.subscription_listener;
         let routes_rx = &mut self.routes_rx;
+        let direct_push_rx = &mut self.direct_push_rx;
         let local_config = &self.local_config;
         let stopped = async {
             match instance.as_mut() {
@@ -490,7 +556,8 @@ impl RuntimeChangeManager {
                 None => std::future::pending().await,
             }
         };
-        let changed = Self::changed_with(subscription_listener, routes_rx, local_config);
+        let changed =
+            Self::changed_with(subscription_listener, routes_rx, direct_push_rx, local_config);
         tokio::select! {
             _ = stopped => Ok(RuntimeEvent::InstanceStopped),
             result = changed => result.map(|change| RuntimeEvent::Changed(Box::new(change))),
@@ -502,6 +569,7 @@ impl RuntimeChangeManager {
         Self::changed_with(
             &mut self.subscription_listener,
             &mut self.routes_rx,
+            &mut self.direct_push_rx,
             &self.local_config,
         )
         .await
@@ -535,6 +603,7 @@ impl RuntimeChangeManager {
     pub(crate) async fn changed_with(
         subscription_listener: &mut Option<SubscriptionListener>,
         routes_rx: &mut watch::Receiver<Vec<NetInput>>,
+        direct_push_rx: &mut watch::Receiver<SubscriptionConfigEnvelope>,
         local_config: &Config,
     ) -> anyhow::Result<RuntimeChange> {
         let (base, present) = match subscription_listener.as_mut() {
@@ -549,10 +618,24 @@ impl RuntimeChangeManager {
                     (envelope.config, envelope.present)
                 }
             },
-            None => {
-                routes_rx.changed().await.context("route source closed")?;
-                (local_config.clone(), std::collections::HashSet::new())
-            }
+            None => tokio::select! {
+                result = routes_rx.changed() => {
+                    let changed: Result<(), watch::error::RecvError> = result;
+                    changed.context("route source closed")?;
+                    (local_config.clone(), std::collections::HashSet::new())
+                }
+                result = direct_push_rx.changed() => {
+                    let changed: Result<(), watch::error::RecvError> = result;
+                    changed.context("direct push source closed")?;
+                    let envelope = direct_push_rx.borrow_and_update().clone();
+                    if envelope.revision != 0 {
+                        let EnvelopeConfig { config, present } = parse_envelope_config(&envelope);
+                        (config, present)
+                    } else {
+                        (local_config.clone(), std::collections::HashSet::new())
+                    }
+                }
+            },
         };
         Ok(RuntimeChange {
             config: merge_present_config(local_config.clone(), &base, &present),

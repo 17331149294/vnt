@@ -209,7 +209,7 @@ impl Subscription {
                 device_id: self.join_id.clone(),
                 identity: SharedNodeIdentity::new(NodeIdentityTemplate {
                     name: self.join_id.clone(),
-                    version: env!("CARGO_PKG_VERSION").to_string(),
+                    version: crate::VERSION.to_string(),
                     network_code: self.join_id.clone(),
                     advertised_subnets: Vec::new(),
                 }),
@@ -340,7 +340,7 @@ async fn run_subscription_connection(
         device_id: subscription.join_id.clone(),
         identity: SharedNodeIdentity::new(NodeIdentityTemplate {
             name: subscription.join_id.clone(),
-            version: env!("CARGO_PKG_VERSION").to_string(),
+            version: crate::VERSION.to_string(),
             network_code: subscription.join_id.clone(),
             advertised_subnets: Vec::new(),
         }),
@@ -489,7 +489,7 @@ fn accept_subscription_update(
 /// 解析信封 TOML 为完整配置 + 出现键集合。身份与受管 IP 来自信封元数据，
 /// 其余字段来自信封 TOML：能解析的按值填入，解析失败记警告并留空（合并时
 /// 未出现的键不会覆盖本地配置，出现但解析失败的字段等同于未设置）。
-fn parse_envelope_config(update: &SubscriptionConfigEnvelope) -> EnvelopeConfig {
+pub(crate) fn parse_envelope_config(update: &SubscriptionConfigEnvelope) -> EnvelopeConfig {
     let table = toml::from_str::<toml::Table>(&update.toml).unwrap_or_else(|error| {
         log::warn!("订阅信封配置不是合法 TOML，仅使用其中的身份与 IP 字段: {error}");
         toml::Table::new()
@@ -516,6 +516,8 @@ fn parse_envelope_config(update: &SubscriptionConfigEnvelope) -> EnvelopeConfig 
         allow_port_mapping: parse_envelope_bool(&table, "allow_port_mapping"),
         allow_ikev2: parse_envelope_bool(&table, "allow_ikev2"),
         allow_wireguard: parse_envelope_bool(&table, "allow_wireguard"),
+        allow_dns: parse_envelope_bool(&table, "allow_dns"),
+        dns: parse_envelope_string_list(&table, "dns"),
         peer_address: parse_typed_list(&table, "peer_address"),
         turn: parse_typed_list(&table, "turn"),
         punch_model: parse_typed_list(&table, "punch_model"),

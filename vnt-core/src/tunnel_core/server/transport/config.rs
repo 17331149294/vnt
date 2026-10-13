@@ -111,7 +111,7 @@ impl ConnectRegConfig {
             device_id: self.device_id.to_string(),
             ip: self.ip.get().map(|network| network.ip),
             name: identity.name,
-            version: env!("CARGO_PKG_VERSION").to_string(),
+            version: crate::VERSION.to_string(),
             key_sign: self.key_sign.clone(),
             ip_variable: self.ip_variable,
             server_id,

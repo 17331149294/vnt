@@ -138,7 +138,7 @@ fn app_info(vnt_api: &VntApi) -> AppInfo {
             .as_ref()
             .map(|v| v.device_name.clone())
             .unwrap_or_default(),
-        version: env!("CARGO_PKG_VERSION").to_string(),
+        version: vnt_core::VERSION.to_string(),
         ip: vnt_api.network().map(|v| v.ip.into()),
         online_client_num,
         offline_client_num,

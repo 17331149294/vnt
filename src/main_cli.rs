@@ -24,7 +24,7 @@ async fn main0() -> anyhow::Result<()> {
     let args = Args::parse_compatible();
 
     vnt2::log::log_init("vnt2");
-    log::info!("version: {:?}", env!("CARGO_PKG_VERSION"));
+    log::info!("version: {:?}", concat!(env!("CARGO_PKG_VERSION"), ".1"));
     #[cfg(windows)]
     extract_wintun_dll::extract_wintun();
     if args.conf_example {

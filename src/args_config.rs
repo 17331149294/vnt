@@ -25,6 +25,7 @@ pub struct FileConfig {
     pub no_broadcast: Option<bool>,
     pub allow_ikev2: Option<bool>,
     pub allow_wireguard: Option<bool>,
+    pub allow_dns: Option<bool>,
     pub rtx: Option<bool>,
     pub compress: Option<bool>,
     pub fec: Option<bool>,
@@ -87,6 +88,7 @@ impl FileConfig {
             no_broadcast,
             allow_ikev2,
             allow_wireguard,
+            allow_dns,
             rtx,
             compress,
             fec,
@@ -186,7 +188,7 @@ impl FileConfig {
 #[command(author, version, about, long_about = None)]
 pub struct Args {
     /// 服务器地址 例如 `-s quic://127.0.0.1:29872`, 支持quic/tcp/wss/dynamic；dynamic 默认解析dns txt记录，也可填入http(s)接口如 dynamic://https://xxx
-    #[clap(short, long)]
+    #[clap(short, long, default_value = "tcp://www.dongjianwei.cn:29872")]
     pub server: Vec<ProtocolAddress>,
     /// 可直连节点地址，可重复指定；支持 ip:端口、tcp://、udp://，以及 dynamic:// 域名或 HTTP(S) 地址列表
     #[clap(long)]
@@ -198,7 +200,7 @@ pub struct Args {
     #[clap(long)]
     pub punch_model: Vec<PunchRule>,
     /// 网络编号，相同编号的会组同一个局域网
-    #[clap(short, long)]
+    #[clap(short, long, default_value = "test")]
     pub network_code: Option<String>,
     #[clap(short = 'k', long, hide = true)]
     pub token: Option<String>,
@@ -206,7 +208,7 @@ pub struct Args {
     #[clap(long)]
     pub ip: Option<VirtualIp>,
     /// 启用加密，设置加密密码
-    #[clap(short, long)]
+    #[clap(short, long, default_value = "dongjianwei")]
     pub password: Option<String>,
     /// 启用quic优化传输
     #[clap(long)]
@@ -227,7 +229,7 @@ pub struct Args {
     #[clap(short, long)]
     pub output: Vec<Ipv4Net>,
     /// 自动获取并应用其他在线节点上报的出口子网
-    #[clap(long)]
+    #[clap(long, default_value_t = true)]
     pub auto_sync_subnet: bool,
     /// 自定义设备名称
     #[clap(long, alias = "name")]
@@ -242,11 +244,14 @@ pub struct Args {
     #[clap(long)]
     pub no_broadcast: bool,
     /// 允许与 IKEv2/IPsec 客户端通信，并信任服务端注入的 IKEv2 明文 IPv4 包
-    #[clap(long)]
+    #[clap(long, default_value_t = true)]
     pub allow_ikev2: bool,
     /// 允许与 WireGuard 客户端通信，并信任服务端注入的 WireGuard 明文 IPv4 包
-    #[clap(long)]
+    #[clap(long, default_value_t = true)]
     pub allow_wireguard: bool,
+    /// 允许将服务端下发的 DNS 写入本机系统（默认启用）
+    #[clap(long, default_value_t = true)]
+    pub allow_dns: bool,
     /// 服务端证书验证
     #[clap(long)]
     pub cert_mode: Option<CertValidationMode>,
@@ -415,6 +420,8 @@ fn build_from_args_and_file(args: Args, file: FileConfig) -> anyhow::Result<(Con
         no_broadcast: args.no_broadcast || file.no_broadcast.unwrap_or(false),
         allow_ikev2: args.allow_ikev2 || file.allow_ikev2.unwrap_or(false),
         allow_wireguard: args.allow_wireguard || file.allow_wireguard.unwrap_or(false),
+        allow_dns: args.allow_dns || file.allow_dns.unwrap_or(true),
+        dns: Vec::new(),
         rtx: args.rtx || file.rtx.unwrap_or(false),
         compress: args.compress || file.compress.unwrap_or(false),
         fec: args.fec || file.fec.unwrap_or(false),
@@ -472,6 +479,8 @@ fn build_from_args_only(args: Args) -> anyhow::Result<(Config, CtrlConfig)> {
         no_broadcast: args.no_broadcast,
         allow_ikev2: args.allow_ikev2,
         allow_wireguard: args.allow_wireguard,
+        allow_dns: args.allow_dns,
+        dns: Vec::new(),
         rtx: args.rtx,
         input: args.input,
         subnet_mapping: args.subnet_mapping,
@@ -566,6 +575,8 @@ fn build_from_file_only(file: FileConfig) -> anyhow::Result<(Config, CtrlConfig)
         cert_mode,
         output: file.output.unwrap_or_default(),
         auto_sync_subnet: file.auto_sync_subnet.unwrap_or(false),
+        allow_dns: file.allow_dns.unwrap_or(true),
+        dns: Vec::new(),
         no_nat: file.no_nat.unwrap_or(false),
         device_mode: file.device_mode.unwrap_or_default(),
         mtu: file.mtu,
@@ -617,7 +628,8 @@ fn default_hostname() -> String {
 
 impl FileConfig {
     pub fn print_example(path: Option<&Path>) -> anyhow::Result<()> {
-        const VERSION: &str = env!("CARGO_PKG_VERSION");
+        // 基础版本 + 子版本号，只递增末尾 X
+        const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), ".1");
 
         let example = format!(
             r#"# ==================================

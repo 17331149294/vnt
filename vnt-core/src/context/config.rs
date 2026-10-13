@@ -550,6 +550,12 @@ pub struct Config {
     pub allow_ikev2: bool,
     /// 允许与由服务端终结的 WireGuard 客户端互通。
     pub allow_wireguard: bool,
+    /// 允许将服务端下发的 DNS 写入本机系统（默认启用）。DNS 来自服务端
+    /// WireGuard 配置页的 dns 框，随订阅/直连信封下发。
+    pub allow_dns: bool,
+    /// 服务端下发的 DNS 服务器列表（来自 WG 配置页 dns 框）；`allow_dns`
+    /// 开启且列表非空时写入本机系统解析。
+    pub dns: Vec<String>,
     pub compress: bool,
     pub rtx: bool,
     pub fec: bool,

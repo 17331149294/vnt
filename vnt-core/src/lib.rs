@@ -27,3 +27,8 @@ pub(crate) mod runtime_config;
 pub mod internal_bench {
     pub use crate::tunnel_core::p2p::route_table::{Route, RouteTable};
 }
+
+/// 版本号 = 基础版本（CARGO_PKG_VERSION）+ 子版本号。只递增末尾 X。
+/// cargo 版本号只允许三段，因此把第四段子版本号拼接到展示字符串。
+/// 各启动路径（CLI/web/JNI/桌面）统一经此上报版本。
+pub const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), ".1");

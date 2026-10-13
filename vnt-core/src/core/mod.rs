@@ -230,7 +230,7 @@ impl NetworkManager {
         ));
         let node_identity = SharedNodeIdentity::new(NodeIdentityTemplate {
             name: config.device_name.clone(),
-            version: env!("CARGO_PKG_VERSION").to_string(),
+            version: crate::VERSION.to_string(),
             network_code: config.network_code.clone(),
             advertised_subnets: advertised_subnets(&config.output, &config.subnet_mapping),
         });
@@ -822,6 +822,9 @@ mod network_route_change_tests {
     async fn subnet_sync_route_source_wakes_the_unified_listener() {
         let routes = SubnetExternalRoute::default();
         let (routes_tx, mut routes_rx) = tokio::sync::watch::channel(Vec::new());
+        let (_dp_tx, mut dp_rx) = tokio::sync::watch::channel(
+            crate::network_info::default_direct_push_envelope(),
+        );
         let task = tokio::spawn(forward_network_route_changes(routes.subscribe(), routes_tx));
 
         let route: crate::nat::NetInput = "192.168.50.0/24,10.26.0.3".parse().unwrap();
@@ -829,7 +832,7 @@ mod network_route_change_tests {
         // 独立模式（无订阅）下 changed_with 等待路由源变更并返回完整快照
         let change = tokio::time::timeout(
             Duration::from_secs(1),
-            RuntimeChangeManager::changed_with(&mut None, &mut routes_rx, &Config::default()),
+            RuntimeChangeManager::changed_with(&mut None, &mut routes_rx, &mut dp_rx, &Config::default()),
         )
         .await
         .unwrap()

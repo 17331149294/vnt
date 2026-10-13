@@ -1351,6 +1351,10 @@ fn parse_config_from_json(json_str: &str, managed: bool) -> anyhow::Result<Confi
         #[serde(default)]
         allow_wireguard: bool,
         #[serde(default)]
+        allow_dns: bool,
+        #[serde(default)]
+        dns: Vec<String>,
+        #[serde(default)]
         compress: bool,
         #[serde(default)]
         rtx: bool,
@@ -1487,6 +1491,8 @@ fn parse_config_from_json(json_str: &str, managed: bool) -> anyhow::Result<Confi
         no_broadcast: cfg.no_broadcast,
         allow_ikev2: cfg.allow_ikev2,
         allow_wireguard: cfg.allow_wireguard,
+        allow_dns: cfg.allow_dns,
+        dns: cfg.dns,
         rtx: cfg.rtx,
         compress: cfg.compress,
         device_id,

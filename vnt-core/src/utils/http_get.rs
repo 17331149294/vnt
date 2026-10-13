@@ -14,7 +14,7 @@ pub(crate) async fn http_get_text(url: &str) -> anyhow::Result<String> {
 
     let client_builder = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
-        .user_agent(format!("vnt/{}", env!("CARGO_PKG_VERSION")));
+        .user_agent(format!("vnt/{}", crate::VERSION));
 
     // reqwest defaults to rustls-platform-verifier. On Android that verifier
     // must be initialized with a JVM Context and requires companion Kotlin

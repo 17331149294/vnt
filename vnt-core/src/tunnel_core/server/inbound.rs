@@ -253,31 +253,48 @@ impl ServerTurnInboundHandler {
                 self.refresh_automatic_subnet_routes(network_addr.ip);
             }
             MsgType::SubscriptionConfigPush => {
-                if !self.subscription_verified.load(Ordering::Acquire) {
-                    let now = crate::utils::time::now_ts_ms();
-                    let last = self.last_unverified_push_log.load(Ordering::Relaxed);
-                    if now.saturating_sub(last) >= 10_000
-                        && self
-                            .last_unverified_push_log
-                            .compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed)
-                            .is_ok()
-                    {
+                let config = SubscriptionConfigEnvelope::from_slice(net_packet.payload())?;
+                let is_managed = self.subscription_identity.is_some();
+                if is_managed {
+                    if !self.subscription_verified.load(Ordering::Acquire) {
+                        let now = crate::utils::time::now_ts_ms();
+                        let last = self.last_unverified_push_log.load(Ordering::Relaxed);
+                        if now.saturating_sub(last) >= 10_000
+                            && self
+                                .last_unverified_push_log
+                                .compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed)
+                                .is_ok()
+                        {
+                            log::warn!(
+                                "服务器 {} 未通过订阅链接凭据校验，已忽略其下发的配置",
+                                self.server_id
+                            );
+                        }
+                        return Ok(());
+                    }
+                    if self.subscription_identity.as_ref().is_none_or(|identity| {
+                        identity.0 != config.network_code || identity.1 != config.device_id
+                    }) {
                         log::warn!(
-                            "服务器 {} 未通过订阅链接凭据校验，已忽略其下发的配置",
+                            "服务器 {} 下发了不匹配的订阅链接管理身份，已忽略",
                             self.server_id
                         );
+                        return Ok(());
                     }
-                    return Ok(());
-                }
-                let config = SubscriptionConfigEnvelope::from_slice(net_packet.payload())?;
-                if self.subscription_identity.as_ref().is_none_or(|identity| {
-                    identity.0 != config.network_code || identity.1 != config.device_id
-                }) {
-                    log::warn!(
-                        "服务器 {} 下发了不匹配的订阅链接管理身份，已忽略",
-                        self.server_id
-                    );
-                    return Ok(());
+                } else {
+                    // 无订阅凭据的直连客户端：按客户端自身身份匹配即接受。
+                    let local = self.app_state.get_config();
+                    let matches = local.as_ref().is_some_and(|local| {
+                        local.network_code == config.network_code
+                            && local.device_id == config.device_id
+                    });
+                    if !matches {
+                        log::warn!(
+                            "服务器 {} 下发了不匹配的直连管理身份，已忽略",
+                            self.server_id
+                        );
+                        return Ok(());
+                    }
                 }
                 self.app_state.push_subscription_config(config);
             }
