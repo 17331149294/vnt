@@ -268,13 +268,19 @@ impl DeviceIOManager {
 
     /// 将服务端下发的 DNS 写入本机系统（`--allow-dns`，默认启用）。
     ///
-    /// 只有 `allow_dns` 开启且 DNS 列表非空时才动作：Windows 通过 netsh 把
+    /// 只要收到非空的 DNS 列表就会在日志中打印下发值（便于确认服务端是否
+    /// 下发）；写入动作仅在 `allow_dns` 开启时进行：Windows 通过 netsh 把
     /// DNS 写入虚拟网卡（需要管理员权限，失败仅告警）；Linux/FreeBSD 尽力
     /// 重写 /etc/resolv.conf；移动平台由宿主（VpnService）消费快照中的 dns，
     /// 本方法为空操作。
     #[cfg(not(any(target_os = "android", target_os = "ios", target_os = "tvos")))]
     pub async fn apply_system_dns(&self, allow_dns: bool, dns: &[String]) {
-        if !allow_dns || dns.is_empty() {
+        if dns.is_empty() {
+            return;
+        }
+        log::info!("服务端下发 DNS: {:?}", dns);
+        if !allow_dns {
+            log::info!("已收到服务端下发 DNS，但 --allow-dns 未开启，未写入虚拟网卡");
             return;
         }
         let valid: Vec<&str> = dns
